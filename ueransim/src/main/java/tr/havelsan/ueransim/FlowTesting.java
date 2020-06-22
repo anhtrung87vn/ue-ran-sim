@@ -22,11 +22,13 @@ import tr.havelsan.ueransim.utils.octets.OctetString;
 
 import java.lang.reflect.Constructor;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-public class FlowTesting extends Thread {
+public class FlowTesting implements Runnable {
 
-    int selection;
+    final int selection;
 
     public FlowTesting(int selection) {
         this.selection = selection;
@@ -35,98 +37,163 @@ public class FlowTesting extends Thread {
     @Override
     public void run() {
 
-            System.out.println("selection " + selection);
+        var config = new LinkedHashMap<String, String>();
+        var configYaml = (ImplicitTypedObject) MtsDecoder.decode("config.yaml");
+        for (var e : configYaml.getParameters().entrySet()) {
+            config.put(e.getKey(), String.valueOf(e.getValue()));
+        }
 
-            var config = new LinkedHashMap<String, String>();
-            var configYaml = (ImplicitTypedObject) MtsDecoder.decode("config.yaml");
-            for (var e : configYaml.getParameters().entrySet()) {
-                config.put(e.getKey(), String.valueOf(e.getValue()));
+        var types = new LinkedHashMap<String, Class<? extends BaseFlow>>();
+        var typeNames = new ArrayList<String>();
+        for (String fn : FlowScanner.getFlowNames()) {
+            var type = FlowScanner.getFlowType(fn);
+            types.put(fn, type);
+            typeNames.add(fn);
+        }
+
+        var configOrder = new HashMap<String, Integer>();
+        for (var entry : config.entrySet()) {
+            String key = entry.getKey();
+            if (key.matches("^input\\.[a-zA-Z]+$")) {
+                configOrder.put(key.substring("input.".length()), configOrder.size());
             }
+        }
 
-            var types = new LinkedHashMap<String, Class<? extends BaseFlow>>();
-            var typeNames = new ArrayList<String>();
-            for (String fn : FlowScanner.getFlowNames()) {
-                var type = FlowScanner.getFlowType(fn);
-                types.put(fn, type);
-                typeNames.add(fn);
-            }
+        typeNames.sort((string1, string2) -> {
+            Integer i1 = configOrder.get(string1);
+            Integer i2 = configOrder.get(string2);
+            if (i1 == null && i2 == null) return 0;
+            if (i1 == null) return 1;
+            if (i2 == null) return -1;
+            return i1.compareTo(i2);
+        });
 
-            var configOrder = new HashMap<String, Integer>();
-            for (var entry : config.entrySet()) {
-                String key = entry.getKey();
-                if (key.matches("^input\\.[a-zA-Z]+$")) {
-                    configOrder.put(key.substring("input.".length()), configOrder.size());
-                }
-            }
+        var simContext = createSimContext(configYaml);
 
-            typeNames.sort((string1, string2) -> {
-                Integer i1 = configOrder.get(string1);
-                Integer i2 = configOrder.get(string2);
-                if (i1 == null && i2 == null) return 0;
-                if (i1 == null) return 1;
-                if (i2 == null) return -1;
-                return i1.compareTo(i2);
-            });
+        Console.println(Color.BLUE, "Trying to establish SCTP connection... (%s:%s)", simContext.amfHost, simContext.amfPort);
+        try {
+            simContext.sctpClient.start();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
 
-            var simContext = createSimContext(configYaml);
+        catchINTSignal(simContext.sctpClient);
 
-            Console.println(Color.BLUE, "Trying to establish SCTP connection... (%s:%s)", simContext.amfHost, simContext.amfPort);
+        Console.println(Color.BLUE, "SCTP connection established.");
+
+        Console.printDiv();
+
+        if (!simContext.sctpClient.isOpen())
+            System.exit(1);
+
+        if (selection == 0) {
+            simContext.sctpClient.close();
+            System.exit(1);
+        }
+
+        if (selection < 1 || selection - 1 >= typeNames.size()) {
+            System.exit(1);
+        }
+
+        var selectedType = types.get(typeNames.get(selection - 1));
+        var ctor = findConstructor(selectedType);
+        var inputType = ctor.getParameterCount() > 1 ? ctor.getParameterTypes()[1] : null;
+
+        if (inputType != null) {
+            String key = "input." + typeNames.get(selection - 1);
             try {
-                simContext.sctpClient.start();
+                ctor.newInstance(simContext, readInputFile(key, "" + config.get(key), inputType))
+                        .start();
             } catch (Exception e) {
                 e.printStackTrace();
             }
-
-            catchINTSignal(simContext.sctpClient);
-
-            Console.println(Color.BLUE, "SCTP connection established.");
-
-            Console.printDiv();
-
-            if (!simContext.sctpClient.isOpen())
-                System.exit(1);
-
-            if (selection == 0) {
-                simContext.sctpClient.close();
-                System.exit(1);
+        } else {
+            try {
+                ctor.newInstance(simContext)
+                        .start();
+            } catch (Exception e) {
+                e.printStackTrace();
             }
-
-            if (selection < 1 || selection - 1 >= typeNames.size()) {
-                System.exit(1);
-            }
-
-            var selectedType = types.get(typeNames.get(selection - 1));
-            var ctor = findConstructor(selectedType);
-            var inputType = ctor.getParameterCount() > 1 ? ctor.getParameterTypes()[1] : null;
-
-            if (inputType != null) {
-                String key = "input." + typeNames.get(selection - 1);
-                try {
-                    ctor.newInstance(simContext, readInputFile(key, "" + config.get(key), inputType))
-                            .start();
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            } else {
-                try {
-                    ctor.newInstance(simContext)
-                            .start();
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            }
+        }
 
     }
-
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args) {
         MtsInitializer.initMts();
 
+        int selection;
 
-        FlowTesting f1 = new FlowTesting(1);
-        f1.start();
+        var scanner = new Scanner(System.in);
 
-        FlowTesting f2 = new FlowTesting(1);
-        f2.start();
+        var types = new LinkedHashMap<String, Class<? extends BaseFlow>>();
+
+        var config = new LinkedHashMap<String, String>();
+
+        var configYaml = (ImplicitTypedObject) MtsDecoder.decode("config.yaml");
+        for (var e : configYaml.getParameters().entrySet()) {
+            config.put(e.getKey(), String.valueOf(e.getValue()));
+        }
+
+        Object userCount = configYaml.getParameters().get("userCount");
+
+        var configOrder = new HashMap<String, Integer>();
+        for (var entry : config.entrySet()) {
+            String key = entry.getKey();
+            if (key.matches("^input\\.[a-zA-Z]+$")) {
+                configOrder.put(key.substring("input.".length()), configOrder.size());
+            }
+        }
+
+
+        var typeNames = new ArrayList<String>();
+
+        for (String fn : FlowScanner.getFlowNames()) {
+            var type = FlowScanner.getFlowType(fn);
+            types.put(fn, type);
+            typeNames.add(fn);
+        }
+
+        typeNames.sort((string1, string2) -> {
+            Integer i1 = configOrder.get(string1);
+            Integer i2 = configOrder.get(string2);
+            if (i1 == null && i2 == null) return 0;
+            if (i1 == null) return 1;
+            if (i2 == null) return -1;
+            return i1.compareTo(i2);
+        });
+
+
+        while (true) {
+            Console.printDiv();
+
+            Console.println(Color.BLUE, "Select a flow:");
+            Console.print(Color.BLUE, "0) ");
+            Console.println(null, "Close connection");
+            for (int i = 0; i < typeNames.size(); i++) {
+                Console.print(Color.BLUE, i + 1 + ") ");
+                Console.println(null, typeNames.get(i));
+            }
+            Console.print(Color.BLUE, "Selection: ");
+
+            try {
+                selection = scanner.nextInt();
+                break;
+            } catch (Exception e) {
+                Console.println(Color.YELLOW, "Invalid selection");
+            }
+
+        }
+
+        ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+
+        try {
+
+            for (int i = 0; i < Integer.valueOf((int)userCount); i++) {
+                executor.execute(new FlowTesting(selection));
+            }
+        } catch (Exception err) {
+            err.printStackTrace();
+        }
+        executor.shutdown();
     }
 
     private static SimulationContext createSimContext(ImplicitTypedObject config) {

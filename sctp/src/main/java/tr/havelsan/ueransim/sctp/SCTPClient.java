@@ -8,7 +8,7 @@ import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 
 public class SCTPClient implements ISCTPClient {
-    private static final int RECEIVER_BUFFER_SIZE = 1073741824;
+    private static final int RECEIVER_BUFFER_SIZE = 1741824;
 
     private final String host;
     private final int port;
