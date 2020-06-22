@@ -14,7 +14,9 @@ input.DeregistrationFlow: flows/deregistration.yaml
 input.NgResetFlow: flows/ngreset.yaml
 
 ueData: '@ueData_i2i.yaml'
-userCount: 5
+userCount: 3
+random: false
+
 
 ue.smsOverNas: true
 ue.requestedNssai:

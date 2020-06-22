@@ -54,6 +54,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class FlowTesting implements Runnable {
 
+    private static boolean isRandom;
     final int selection;
 
     public FlowTesting(int selection) {
@@ -143,6 +144,7 @@ public class FlowTesting implements Runnable {
         }
 
     }
+
     public static void main(String[] args) {
         MtsInitializer.initMts();
 
@@ -213,8 +215,13 @@ public class FlowTesting implements Runnable {
 
         try {
 
-            for (int i = 0; i < Integer.valueOf((int)userCount); i++) {
+            for (int i = 0; i < (int) userCount; i++) {
+
+                if ((boolean)configYaml.getParameters().get("random"))
+                    Thread.sleep((int) ((Math.random() * 4750)));
+
                 executor.execute(new FlowTesting(selection));
+
             }
         } catch (Exception err) {
             err.printStackTrace();
