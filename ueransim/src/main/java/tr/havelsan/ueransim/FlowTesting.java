@@ -24,107 +24,75 @@ import java.lang.reflect.Constructor;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-public class FlowTesting {
+public class FlowTesting extends Thread {
 
-    public static void main(String[] args) throws Exception {
-        MtsInitializer.initMts();
+    int selection;
 
-        var scanner = new Scanner(System.in);
+    public FlowTesting(int selection) {
+        this.selection = selection;
+    }
 
-        var config = new LinkedHashMap<String, String>();
-        var configYaml = (ImplicitTypedObject) MtsDecoder.decode("config.yaml");
-        for (var e : configYaml.getParameters().entrySet()) {
-            config.put(e.getKey(), String.valueOf(e.getValue()));
-        }
+    @Override
+    public void run() {
 
-        var types = new LinkedHashMap<String, Class<? extends BaseFlow>>();
-        var typeNames = new ArrayList<String>();
-        for (String fn : FlowScanner.getFlowNames()) {
-            var type = FlowScanner.getFlowType(fn);
-            types.put(fn, type);
-            typeNames.add(fn);
-        }
+            System.out.println("selection " + selection);
 
-        var configOrder = new HashMap<String, Integer>();
-        for (var entry : config.entrySet()) {
-            String key = entry.getKey();
-            if (key.matches("^input\\.[a-zA-Z]+$")) {
-                configOrder.put(key.substring("input.".length()), configOrder.size());
+            var config = new LinkedHashMap<String, String>();
+            var configYaml = (ImplicitTypedObject) MtsDecoder.decode("config.yaml");
+            for (var e : configYaml.getParameters().entrySet()) {
+                config.put(e.getKey(), String.valueOf(e.getValue()));
             }
-        }
 
-        typeNames.sort((string1, string2) -> {
-            Integer i1 = configOrder.get(string1);
-            Integer i2 = configOrder.get(string2);
-            if (i1 == null && i2 == null) return 0;
-            if (i1 == null) return 1;
-            if (i2 == null) return -1;
-            return i1.compareTo(i2);
-        });
-
-        var simContext = createSimContext(configYaml);
-
-        Console.println(Color.BLUE, "Trying to establish SCTP connection... (%s:%s)", simContext.amfHost, simContext.amfPort);
-        simContext.sctpClient.start();
-
-        catchINTSignal(simContext.sctpClient);
-
-        Console.println(Color.BLUE, "SCTP connection established.");
-
-        String flowName = Utils.getCommandLineOption(args, "-f");
-        String yamlFile = Utils.getCommandLineOption(args, "-y");
-
-        if (flowName != null && yamlFile != null) {
-            var type = FlowScanner.getFlowType(flowName);
-            if (type == null) {
-                throw new RuntimeException("Flow not found: " + flowName);
+            var types = new LinkedHashMap<String, Class<? extends BaseFlow>>();
+            var typeNames = new ArrayList<String>();
+            for (String fn : FlowScanner.getFlowNames()) {
+                var type = FlowScanner.getFlowType(fn);
+                types.put(fn, type);
+                typeNames.add(fn);
             }
-            var ctor = findConstructor(type);
-            var inputType = ctor.getParameterCount() > 1 ? ctor.getParameterTypes()[1] : null;
 
-            if (inputType != null) {
-                ctor.newInstance(simContext, readInputFile("", yamlFile, inputType))
-                        .start();
-            } else {
-                ctor.newInstance(simContext)
-                        .start();
+            var configOrder = new HashMap<String, Integer>();
+            for (var entry : config.entrySet()) {
+                String key = entry.getKey();
+                if (key.matches("^input\\.[a-zA-Z]+$")) {
+                    configOrder.put(key.substring("input.".length()), configOrder.size());
+                }
             }
-            return;
-        }
 
-        while (true) {
+            typeNames.sort((string1, string2) -> {
+                Integer i1 = configOrder.get(string1);
+                Integer i2 = configOrder.get(string2);
+                if (i1 == null && i2 == null) return 0;
+                if (i1 == null) return 1;
+                if (i2 == null) return -1;
+                return i1.compareTo(i2);
+            });
+
+            var simContext = createSimContext(configYaml);
+
+            Console.println(Color.BLUE, "Trying to establish SCTP connection... (%s:%s)", simContext.amfHost, simContext.amfPort);
+            try {
+                simContext.sctpClient.start();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+
+            catchINTSignal(simContext.sctpClient);
+
+            Console.println(Color.BLUE, "SCTP connection established.");
+
             Console.printDiv();
 
             if (!simContext.sctpClient.isOpen())
-                break;
-
-            Console.println(Color.BLUE, "Select a flow:");
-            Console.print(Color.BLUE, "0) ");
-            Console.println(null, "Close connection");
-            for (int i = 0; i < typeNames.size(); i++) {
-                Console.print(Color.BLUE, i + 1 + ") ");
-                Console.println(null, typeNames.get(i));
-            }
-            Console.print(Color.BLUE, "Selection: ");
-
-            int selection;
-            try {
-                selection = scanner.nextInt();
-            } catch (Exception e) {
-                Console.println(Color.YELLOW, "Invalid selection");
-                continue;
-            }
-            scanner.nextLine();
-            Console.println();
+                System.exit(1);
 
             if (selection == 0) {
                 simContext.sctpClient.close();
-                break;
+                System.exit(1);
             }
 
             if (selection < 1 || selection - 1 >= typeNames.size()) {
-                Console.println(Color.YELLOW, "Invalid selection: " + selection);
-                continue;
+                System.exit(1);
             }
 
             var selectedType = types.get(typeNames.get(selection - 1));
@@ -133,13 +101,32 @@ public class FlowTesting {
 
             if (inputType != null) {
                 String key = "input." + typeNames.get(selection - 1);
-                ctor.newInstance(simContext, readInputFile(key, "" + config.get(key), inputType))
-                        .start();
+                try {
+                    ctor.newInstance(simContext, readInputFile(key, "" + config.get(key), inputType))
+                            .start();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
             } else {
-                ctor.newInstance(simContext)
-                        .start();
+                try {
+                    ctor.newInstance(simContext)
+                            .start();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
             }
-        }
+
+    }
+
+    public static void main(String[] args) throws Exception {
+        MtsInitializer.initMts();
+
+
+        FlowTesting f1 = new FlowTesting(1);
+        f1.start();
+
+        FlowTesting f2 = new FlowTesting(1);
+        f2.start();
     }
 
     private static SimulationContext createSimContext(ImplicitTypedObject config) {

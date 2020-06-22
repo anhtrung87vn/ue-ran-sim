@@ -67,10 +67,19 @@ public class Ngap {
         return Ngap.context = context;
     }
 
-    public static byte[] perEncode(Value value) {
+    public synchronized static byte[] perEncode(Value value) {
         try (var stream = new ByteArrayOutputStream()) {
-            value.perEncode(getContext(), stream);
+
+          Context c  =  getContext();
+
+            try {
+                value.perEncode(c, stream);
+            }catch (Exception e){
+                e.printStackTrace();
+            }
+
             return stream.toByteArray();
+            
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -90,7 +99,7 @@ public class Ngap {
         return perDecode(type, Utils.hexStringToByteArray(base16));
     }
 
-    public static String xerEncode(Value value) {
+    public synchronized static String xerEncode(Value value) {
         try (var stream = new ByteArrayOutputStream()) {
             value.xerEncode(getContext(), stream);
             var data = stream.toByteArray();

@@ -11,7 +11,7 @@ import tr.havelsan.ueransim.ngap2.NgapProcedure;
 
 import static tr.havelsan.ueransim.ngap.Values.NGAP_Constants__id_DefaultPagingDRX;
 
-public class NgSetupFlow extends BaseFlow implements Runnable{
+public class NgSetupFlow extends BaseFlow {
     private final NgSetupConfig config;
 
     public NgSetupFlow(SimulationContext simContext, NgSetupConfig config) {
@@ -21,17 +21,12 @@ public class NgSetupFlow extends BaseFlow implements Runnable{
 
     @Override
     public State main(IncomingMessage message) throws Exception {
-
-        for (int i = 0; i <2 ; i++) {
-
-            new Thread(() -> send(new SendingMessage(
-                    new NgapBuilder(NgapProcedure.NGSetupRequest, NgapCriticality.REJECT)
-                            .addProtocolIE(URSimUtils.createGlobalGnbId(config.gnbId, config.gnbPlmn), NgapCriticality.REJECT)
-                            .addProtocolIE(URSimUtils.createSupportedTAList(config.supportedTAs), NgapCriticality.REJECT)
-                            .addProtocolIE(new PagingDRX(PagingDRX.ASN_v64), NgapCriticality.IGNORE, NGAP_Constants__id_DefaultPagingDRX), null
-            ))).start();
-        }
-
+        send(new SendingMessage(
+                new NgapBuilder(NgapProcedure.NGSetupRequest, NgapCriticality.REJECT)
+                        .addProtocolIE(URSimUtils.createGlobalGnbId(config.gnbId, config.gnbPlmn), NgapCriticality.REJECT)
+                        .addProtocolIE(URSimUtils.createSupportedTAList(config.supportedTAs), NgapCriticality.REJECT)
+                        .addProtocolIE(new PagingDRX(PagingDRX.ASN_v64), NgapCriticality.IGNORE, NGAP_Constants__id_DefaultPagingDRX), null
+        ));
         return this::waitNgSetupResponse;
     }
 
@@ -52,17 +47,6 @@ public class NgSetupFlow extends BaseFlow implements Runnable{
 
     @Override
     public void onSent(OutgoingMessage outgoingMessage) {
-
-    }
-
-    @Override
-    public void run() {
-        send(new SendingMessage(
-                new NgapBuilder(NgapProcedure.NGSetupRequest, NgapCriticality.REJECT)
-                        .addProtocolIE(URSimUtils.createGlobalGnbId(config.gnbId, config.gnbPlmn), NgapCriticality.REJECT)
-                        .addProtocolIE(URSimUtils.createSupportedTAList(config.supportedTAs), NgapCriticality.REJECT)
-                        .addProtocolIE(new PagingDRX(PagingDRX.ASN_v64), NgapCriticality.IGNORE, NGAP_Constants__id_DefaultPagingDRX), null
-        ));
 
     }
 }
